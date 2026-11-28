@@ -184,8 +184,10 @@ html.expanded-game #arena{position:fixed;inset:0;z-index:100;width:100%;height:1
 
 .weapon-actions{display:flex;gap:10px;padding:8px 4px;flex-wrap:wrap}.weapon-actions[hidden]{display:none}.weapon-actions button{flex:1;white-space:nowrap;border:1px solid #ffe0a2;background:#f4d899;color:#292337;padding:10px;border-radius:5px;font-weight:800}.weapon-actions button:disabled{opacity:.45}
 #ketchup-crosshair{position:absolute;pointer-events:none;width:27px;height:27px;transform:translate(-50%,-50%);border:2px solid #fff4cb;border-radius:50%;box-shadow:0 0 0 2px #341d2aaa,0 1px 8px #171020b0;z-index:4}#ketchup-crosshair:before,#ketchup-crosshair:after{content:'';position:absolute;background:#fff4cb;box-shadow:0 0 2px #241720}#ketchup-crosshair:before{width:39px;height:2px;left:-8px;top:11px}#ketchup-crosshair:after{height:39px;width:2px;left:11px;top:-8px}#ketchup-crosshair[data-target=true]{border-color:#ff8e6d;box-shadow:0 0 0 2px #67251bcc,0 0 16px #ed6b36aa}
+
+#weapon-warning{top:84px;bottom:auto;z-index:5;border-color:#ffd6a0;color:#ffebcb;background:#492b28f2}@media(pointer:coarse){#weapon-warning{top:98px;bottom:auto}}
 </style>
-<meta name="kartoffelman-version" content="2026-11-28-lanze-parade-dachphase">
+<meta name="kartoffelman-version" content="2026-11-28-gabel-bleibt-waffenbruch">
 </head>
 <body>
   <main>
@@ -4478,9 +4480,28 @@ p0 = function () {
   return { ...kmBaseInventory(), equippedSlot: 0, durabilityBySlot: [null], broccoliDefeats: 0 };
 };
 function kmNormalizeInventory(player) {
-  const bag = player.inventory;
-  if (!bag.durabilityBySlot) bag.durabilityBySlot = bag.weapons.map(id => bag.durability[id] ?? gi[id].durability ?? null);
-  if (!Number.isInteger(bag.equippedSlot) || bag.weapons[bag.equippedSlot] !== bag.equipped) bag.equippedSlot = Math.max(0, bag.weapons.indexOf(bag.equipped));
+  const bag=player.inventory;
+  if(!bag.durabilityBySlot)bag.durabilityBySlot=bag.weapons.map(id=>bag.durability[id]??gi[id].durability??null);
+  // Enforce the permanent starter weapon at every inventory boundary. Stale
+  // zero-durability slots from an older state cannot remain usable or visible.
+  for(let index=bag.weapons.length-1;index>=0;index--){
+    if(bag.weapons[index]!=='fork'&&Number.isFinite(bag.durabilityBySlot[index])&&bag.durabilityBySlot[index]<=0){
+      bag.weapons.splice(index,1);bag.durabilityBySlot.splice(index,1);
+      if(bag.equippedSlot>index)bag.equippedSlot--;
+    }
+  }
+  if(!bag.weapons.includes('fork')){
+    bag.weapons.unshift('fork');bag.durabilityBySlot.unshift(null);
+    if(Number.isInteger(bag.equippedSlot)&&bag.equippedSlot>=0)bag.equippedSlot++;
+  }
+  if(!bag.weapons.includes(bag.equipped)){
+    bag.equipped='fork';bag.equippedSlot=bag.weapons.indexOf('fork');
+    player.forkMove=player.forkQueued=null;player.forkTime=0;
+    if(bag.kmStowedShield){bag.equippedShield=bag.shields.includes(bag.kmStowedShield)?bag.kmStowedShield:null;bag.kmStowedShield=null;}
+  }
+  if(!Number.isInteger(bag.equippedSlot)||bag.weapons[bag.equippedSlot]!==bag.equipped)bag.equippedSlot=bag.weapons.indexOf(bag.equipped);
+  bag.durabilityBySlot[bag.weapons.indexOf('fork')]=null;delete bag.durability.fork;
+  if(bag.equipped!=='fork')bag.durability[bag.equipped]=bag.durabilityBySlot[bag.equippedSlot];
   return bag;
 }
 ml = function (player, item) {
@@ -4513,7 +4534,7 @@ Tf = function (player, id, index = player.inventory.weapons.indexOf(id)) {
 };
 Sf = function (player) {
   const bag = kmNormalizeInventory(player), id = bag.equipped, index = bag.equippedSlot;
-  if (gi[id].durability === undefined) return;
+  if (id==='fork'||gi[id].durability === undefined) return;
   bag.durabilityBySlot[index] -= 1;
   bag.durability[id] = bag.durabilityBySlot[index];
   if (bag.durabilityBySlot[index] > 0) return;
@@ -4854,7 +4875,7 @@ V1 = function (arena, player, area, canOpen, onToggle) {
         value.textContent = us[id].heal === Infinity ? 'Füllt alle Herzen' : '+' + fr(us[id].heal) + (us[id].heal > 1 ? ' Herzen' : ' Herz');
       } else if (tab === 1) {
         title.textContent = gi[id].name;
-        value.textContent = (bag.equippedSlot === index ? 'Ausgerüstet · ' : '') + (gi[id].durability ? bag.durabilityBySlot[index] + '/' + gi[id].durability + ' Treffer' : 'Unzerbrechlich');
+        value.textContent = (bag.equippedSlot === index ? 'Ausgerüstet · ' : '') + (gi[id].durability ? bag.durabilityBySlot[index] + '/' + gi[id].durability + ' Treffer' : 'Immer dabei · Unzerbrechlich');
       } else {
         title.textContent = mi[id].name;
         value.textContent = (bag.equippedShield === id ? 'Ausgerüstet · ' : '') + (id === 'binLid' ? 'Größeres Paradefenster · B' : 'Präzise Parade · B');
@@ -5266,6 +5287,11 @@ function kmApplyEquipmentPose(player,grip,arms){
   const figure=arms[0].parent,rig=kmHeroRigs.get(figure);
   kmTwoHandedPose(rig,figure,!!gi[player.inventory.equipped]?.twoHanded);
 }
+const kmArmoryEnemyFactory=Jt;
+Jt=function(type,...args){const enemy=kmArmoryEnemyFactory(type,...args);
+  if(type==='strawberryCake')enemy.kmWeapon={id:'appleSliceSpear',story:true,durability:30};
+  return enemy;
+};
 const kmArmedTypes=new Set(['broccoli','largeBroccoli','muffin','sprinkleMuffin','zooGummy']);
 const kmArmoryPickupVisible=ml;
 ml=function(player,item){return !item.kmHeldBy&&!item.kmSpent&&kmArmoryPickupVisible(player,item);};
@@ -5534,7 +5560,7 @@ v1=function(canvas,context){
   const world=kmAimWorld(canvas,context),render=world.render.bind(world),arena=document.getElementById('arena');
   const reticle=document.createElement('div');reticle.id='ketchup-crosshair';reticle.setAttribute('aria-label','Ziel der Ketchup-Kanone');reticle.hidden=true;arena.append(reticle);
   world.render=function(...args){
-    render(...args);const[player,enemies,area]=args;
+    kmNormalizeInventory(args[0]);render(...args);const[player,enemies,area]=args;
     reticle.hidden=kmInventoryOpen||player.inventory.equipped!=='ketchupCannon'||player.hearts<=0;
     if(!reticle.hidden){const aim=kmCannonAim(player,enemies,area),point=new B(aim.point.x,aim.point.y,aim.point.z).project(world.camera);
       const rect=canvas.getBoundingClientRect(),host=arena.getBoundingClientRect();
